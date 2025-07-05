@@ -233,7 +233,13 @@ class _HomeState extends State<Home> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const DuoChallengeLobbyScreen(),
+                  builder: (context) => DuoChallengeLobbyScreen(
+                    inviteId: invite['inviteId'],
+                    user1Uid: invite['fromUserId'],
+                    user2Uid: invite['recipientUserId'],
+                    user1Name: invite['inviterDisplayName'],
+                    user2Name: invite['recipientDisplayName'],
+                  ),
                 ),
               );
             },

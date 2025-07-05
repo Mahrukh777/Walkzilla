@@ -50,7 +50,13 @@ class _DuoChallengeInviteDialogState extends State<DuoChallengeInviteDialog> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => const DuoChallengeLobbyScreen(),
+            builder: (context) => DuoChallengeLobbyScreen(
+              inviteId: widget.inviteId,
+              user1Uid: doc.data()?['fromUserId'] ?? '',
+              user2Uid: doc.data()?['toUserId'] ?? '',
+              user1Name: doc.data()?['inviterDisplayName'],
+              user2Name: doc.data()?['recipientDisplayName'],
+            ),
           ),
         );
       }
@@ -504,15 +510,135 @@ class _DuoChallengeInviteDialogState extends State<DuoChallengeInviteDialog> {
   }
 }
 
-// Placeholder for the lobby screen
-class DuoChallengeLobbyScreen extends StatelessWidget {
-  const DuoChallengeLobbyScreen({super.key});
+class DuoChallengeLobbyScreen extends StatefulWidget {
+  final String inviteId;
+  final String user1Uid;
+  final String user2Uid;
+  final String? user1Name;
+  final String? user2Name;
+  const DuoChallengeLobbyScreen({
+    super.key,
+    required this.inviteId,
+    required this.user1Uid,
+    required this.user2Uid,
+    this.user1Name,
+    this.user2Name,
+  });
+
+  @override
+  State<DuoChallengeLobbyScreen> createState() =>
+      _DuoChallengeLobbyScreenState();
+}
+
+class _DuoChallengeLobbyScreenState extends State<DuoChallengeLobbyScreen> {
+  late String currentUid;
+  late String otherUid;
+  late String currentName;
+  late String otherName;
+
+  @override
+  void initState() {
+    super.initState();
+    currentUid = FirebaseAuth.instance.currentUser!.uid;
+    if (currentUid == widget.user1Uid) {
+      otherUid = widget.user2Uid;
+      currentName = widget.user1Name ?? 'You';
+      otherName = widget.user2Name ?? 'Friend';
+    } else {
+      otherUid = widget.user1Uid;
+      currentName = widget.user2Name ?? 'You';
+      otherName = widget.user1Name ?? 'Friend';
+    }
+  }
+
+  Future<void> _setReady() async {
+    final docRef = FirebaseFirestore.instance
+        .collection('duo_challenge_invites')
+        .doc(widget.inviteId);
+    await docRef.set({
+      'ready': {currentUid: true},
+    }, SetOptions(merge: true));
+  }
 
   @override
   Widget build(BuildContext context) {
+    final docRef = FirebaseFirestore.instance
+        .collection('duo_challenge_invites')
+        .doc(widget.inviteId);
     return Scaffold(
       appBar: AppBar(title: const Text('Duo Challenge Lobby')),
-      body: const Center(child: Text('Waiting for both players...')),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: docRef.snapshots(),
+        builder: (context, snapshot) {
+          final data = snapshot.data?.data() as Map<String, dynamic>?;
+          final readyMap = (data?['ready'] as Map<String, dynamic>?) ?? {};
+          final isReady = readyMap[currentUid] == true;
+          final otherReady = readyMap[otherUid] == true;
+          return Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildUserCard(currentName, isReady),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: const Text('VS',
+                          style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.deepPurple)),
+                    ),
+                    _buildUserCard(otherName, otherReady),
+                  ],
+                ),
+                const SizedBox(height: 40),
+                if (!isReady)
+                  ElevatedButton(
+                    onPressed: _setReady,
+                    child: const Text('I am Ready!'),
+                  ),
+                if (isReady && !otherReady)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 24.0),
+                    child: Text('Waiting for your friend to be ready...',
+                        style: TextStyle(fontSize: 16)),
+                  ),
+                if (isReady && otherReady)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 24.0),
+                    child: Text('Both players are ready! Starting soon...',
+                        style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold)),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildUserCard(String name, bool isReady) {
+    return Column(
+      children: [
+        CircleAvatar(
+          radius: 32,
+          backgroundColor: isReady ? Colors.green : Colors.grey[400],
+          child: Icon(isReady ? Icons.check : Icons.person,
+              color: Colors.white, size: 32),
+        ),
+        const SizedBox(height: 8),
+        Text(name,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(isReady ? 'Ready' : 'Not Ready',
+            style: TextStyle(color: isReady ? Colors.green : Colors.grey)),
+      ],
     );
   }
 }
