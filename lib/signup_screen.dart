@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'login_screen.dart';
 import 'services/health_service.dart'; // Add this import
 import 'services/username_service.dart'; // Add username service
+import 'main.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -315,6 +316,9 @@ class SignupScreenState extends State<SignupScreen> {
           MaterialPageRoute(builder: (context) => const Home()),
           (route) => false,
         );
+
+        // Check for pending duo challenge invites after navigation
+        checkAndShowPendingInvites();
       }
     } on FirebaseAuthException catch (e) {
       String errorMessage = "An error occurred";
@@ -444,6 +448,9 @@ class SignupScreenState extends State<SignupScreen> {
         MaterialPageRoute(builder: (context) => const Home()),
         (route) => false,
       );
+
+      // Check for pending duo challenge invites after navigation
+      checkAndShowPendingInvites();
 
       // After navigation, check and request health permissions if needed
       if (mounted && isNewUser) {

@@ -27,15 +27,25 @@ class CharacterAnimationService {
 
   /// Preload character animations in the background with optimized loading
   Future<void> preloadAnimations() async {
-    if (_isLoaded || _isLoading) return;
+    print(
+        'CharacterAnimationService: preloadAnimations called - isLoaded: $_isLoaded, isLoading: $_isLoading');
+
+    if (_isLoaded || _isLoading) {
+      print(
+          'CharacterAnimationService: Skipping preload - already loaded or loading');
+      return;
+    }
 
     _isLoading = true;
     print('CharacterAnimationService: Starting optimized preload...');
 
     try {
       // Load animations sequentially to reduce memory pressure
+      print('CharacterAnimationService: Loading idle animation...');
       _cachedIdleAnimation =
           await _loadTexturePackerAnimation('images/character_idle.json', 0.08);
+
+      print('CharacterAnimationService: Loading walking animation...');
       _cachedWalkingAnimation = await _loadTexturePackerAnimation(
           'images/character_walking.json', 0.06);
 
@@ -126,15 +136,34 @@ class CharacterAnimationService {
 
   /// Wait for animations to be loaded (useful for UI)
   Future<void> waitForLoad() async {
-    if (_isLoaded) return;
+    print(
+        'CharacterAnimationService: waitForLoad called - isLoaded: $_isLoaded, isLoading: $_isLoading');
 
+    if (_isLoaded) {
+      print(
+          'CharacterAnimationService: Animations already loaded, returning immediately');
+      return;
+    }
+
+    int waitCount = 0;
     while (_isLoading) {
       await Future.delayed(const Duration(milliseconds: 50));
+      waitCount++;
+      if (waitCount % 20 == 0) {
+        // Log every second
+        print(
+            'CharacterAnimationService: Still waiting for animations to load... (${waitCount * 50}ms)');
+      }
     }
 
     if (!_isLoaded) {
+      print(
+          'CharacterAnimationService: Animations not loaded after waiting, starting preload...');
       await preloadAnimations();
     }
+
+    print(
+        'CharacterAnimationService: waitForLoad completed - isLoaded: $_isLoaded');
   }
 
   /// Get loading progress (0.0 to 1.0)

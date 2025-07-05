@@ -15,6 +15,8 @@ import 'friends_page.dart';
 import 'chat_list_page.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'solo_mode.dart';
+import 'services/duo_challenge_service.dart';
+import 'widgets/duo_challenge_invite_dialog.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -35,6 +37,8 @@ class _HomeState extends State<Home> {
   String _userEmail = '';
   bool _isUserDataLoading = true; // Add loading state for user data
   int _coins = 280; // Example coin count, replace with your logic
+  final DuoChallengeService _duoChallengeService = DuoChallengeService();
+  final Set<String> _shownAcceptedPopups = {};
 
   @override
   void initState() {
@@ -43,6 +47,7 @@ class _HomeState extends State<Home> {
     _startHealthDataRefresh();
     _loadUserData();
     _startCharacterPreloading();
+    _listenForAcceptedDuoInvites();
   }
 
   Future<void> _loadUserData() async {
@@ -180,10 +185,63 @@ class _HomeState extends State<Home> {
 
   /// Start preloading character animations in the background
   void _startCharacterPreloading() {
+    print('Home: Starting character animation preloading...');
     // Start preloading animations in the background
-    CharacterAnimationService().preloadAnimations().catchError((error) {
-      print('Failed to preload character animations: $error');
+    CharacterAnimationService().preloadAnimations().then((_) {
+      print('Home: Character animation preloading completed successfully');
+    }).catchError((error) {
+      print('Home: Failed to preload character animations: $error');
     });
+  }
+
+  void _listenForAcceptedDuoInvites() {
+    _duoChallengeService.getSentInvitesStatusStream().listen((invites) {
+      for (final invite in invites) {
+        if (invite['status'] == 'accepted' &&
+            !_shownAcceptedPopups.contains(invite['inviteId'])) {
+          _shownAcceptedPopups.add(invite['inviteId']);
+          _showDuoAcceptedPopup(invite);
+        }
+      }
+    });
+  }
+
+  void _showDuoAcceptedPopup(Map<String, dynamic> invite) {
+    final recipientName = invite['recipientDisplayName'] ?? 'Your friend';
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('$recipientName has accepted your duo challenge invite!'),
+        content: const Text('Would you like to start the challenge now?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Just close the popup
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              // Update Firestore to signal lobby start
+              await FirebaseFirestore.instance
+                  .collection('duo_challenge_invites')
+                  .doc(invite['inviteId'])
+                  .update({'lobbyStarted': true});
+              // Navigate to lobby
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DuoChallengeLobbyScreen(),
+                ),
+              );
+            },
+            child: const Text('Start the Challenge'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

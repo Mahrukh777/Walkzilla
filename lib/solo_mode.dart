@@ -32,20 +32,51 @@ class _SoloModeState extends State<SoloMode> {
   }
 
   void _checkAnimationStatus() async {
+    print('SoloMode: Checking animation status...');
     final animationService = CharacterAnimationService();
 
-    // If not loaded and not loading, start preloading
-    if (!animationService.isLoaded && !animationService.isLoading) {
-      animationService.preloadAnimations();
+    print(
+        'SoloMode: Animation service - isLoaded: ${animationService.isLoaded}, isLoading: ${animationService.isLoading}');
+
+    // If animations are already loaded, skip loading screen
+    if (animationService.isLoaded) {
+      print('SoloMode: Animations already loaded, skipping loading screen');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+      return;
     }
 
-    // Wait for animations to be ready using the service method
-    await animationService.waitForLoad();
+    // If not loaded and not loading, start preloading
+    if (!animationService.isLoading) {
+      print('SoloMode: Starting animation preloading...');
+      animationService.preloadAnimations();
+    } else {
+      print('SoloMode: Animations are already being loaded...');
+    }
+
+    // Wait for animations to be ready using the service method with timeout
+    try {
+      print('SoloMode: Waiting for animations to load...');
+      await animationService.waitForLoad().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          print('SoloMode: Animation loading timed out, proceeding anyway');
+          return;
+        },
+      );
+      print('SoloMode: Animations loaded successfully');
+    } catch (e) {
+      print('SoloMode: Error waiting for animations: $e');
+    }
 
     if (mounted) {
       setState(() {
         _isLoading = false;
       });
+      print('SoloMode: Loading screen hidden');
     }
   }
 
@@ -274,11 +305,12 @@ class Character extends SpriteAnimationComponent
       final animationService = CharacterAnimationService();
 
       if (animationService.isLoaded) {
-        // Use cached animations
+        // Use cached animations immediately
         idleAnimation = animationService.idleAnimation;
         walkingAnimation = animationService.walkingAnimation;
         _animationsLoaded = true;
-        print('Character onLoad: Using cached animations');
+        animation = idleAnimation;
+        print('Character onLoad: Using cached animations immediately');
       } else {
         // Wait for animations to load or load them now
         print('Character onLoad: Loading animations from service...');
@@ -286,11 +318,10 @@ class Character extends SpriteAnimationComponent
         idleAnimation = animations['idle'];
         walkingAnimation = animations['walking'];
         _animationsLoaded = true;
+        animation = idleAnimation;
         print('Character onLoad: Animations loaded from service');
       }
 
-      animation = idleAnimation;
-      // position = Vector2(20, 250);
       print('Character onLoad success');
     } catch (e, st) {
       print('Character onLoad error: $e');

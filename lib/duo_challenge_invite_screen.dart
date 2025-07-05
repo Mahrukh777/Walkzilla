@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/friend_service.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'services/duo_challenge_service.dart';
 
 class DuoChallengeInviteScreen extends StatefulWidget {
   const DuoChallengeInviteScreen({super.key});
@@ -15,11 +14,20 @@ class DuoChallengeInviteScreen extends StatefulWidget {
 
 class _DuoChallengeInviteScreenState extends State<DuoChallengeInviteScreen> {
   final FriendService _friendService = FriendService();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final DuoChallengeService _duoChallengeService = DuoChallengeService();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   String? _selectedFriendId;
   bool _isInviting = false;
+
+  Future<Map<String, dynamic>> _loadFriendsAndPendingInvites() async {
+    final friends = await _friendService.getFriends().first;
+    final sentInvites = await _duoChallengeService.getSentInvites();
+    final pending = sentInvites
+        .map((invite) => invite['recipientUserId'] as String)
+        .toSet();
+    return {'friends': friends, 'pending': pending};
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,20 +65,17 @@ class _DuoChallengeInviteScreenState extends State<DuoChallengeInviteScreen> {
               ),
               const SizedBox(height: 24),
               Expanded(
-                child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: _friendService.getFriends(),
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: _loadFriendsAndPendingInvites(),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
+                    if (!snapshot.hasData) {
                       return const Center(
                           child: CircularProgressIndicator(
                               color: Color(0xFF7C4DFF)));
                     }
-                    if (snapshot.hasError) {
-                      return Center(
-                          child: Text('Error loading friends',
-                              style: TextStyle(color: Colors.red)));
-                    }
-                    final friends = snapshot.data ?? [];
+                    final friends =
+                        snapshot.data!['friends'] as List<Map<String, dynamic>>;
+                    final pending = snapshot.data!['pending'] as Set<String>;
                     if (friends.isEmpty) {
                       return Center(
                         child: Column(
@@ -98,8 +103,9 @@ class _DuoChallengeInviteScreenState extends State<DuoChallengeInviteScreen> {
                       itemCount: friends.length,
                       itemBuilder: (context, index) {
                         final friend = friends[index];
-                        final isSelected =
-                            _selectedFriendId == friend['userId'];
+                        final friendId = friend['userId'];
+                        final isSelected = _selectedFriendId == friendId;
+                        final hasPendingInvite = pending.contains(friendId);
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           decoration: BoxDecoration(
@@ -160,43 +166,63 @@ class _DuoChallengeInviteScreenState extends State<DuoChallengeInviteScreen> {
                                     fontSize: 14, color: Colors.grey)),
                             trailing: Container(
                               decoration: BoxDecoration(
-                                color: isSelected
-                                    ? const Color(0xFF7C4DFF)
-                                    : Colors.transparent,
+                                color: hasPendingInvite
+                                    ? Colors.grey.withOpacity(0.2)
+                                    : isSelected
+                                        ? const Color(0xFF7C4DFF)
+                                        : Colors.transparent,
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
-                                  color: isSelected
-                                      ? const Color(0xFF7C4DFF)
-                                      : const Color(0xFF7C4DFF)
-                                          .withOpacity(0.3),
+                                  color: hasPendingInvite
+                                      ? Colors.grey.withOpacity(0.3)
+                                      : isSelected
+                                          ? const Color(0xFF7C4DFF)
+                                          : const Color(0xFF7C4DFF)
+                                              .withOpacity(0.3),
                                   width: 2,
                                 ),
                               ),
-                              child: IconButton(
-                                icon: Icon(isSelected ? Icons.check : Icons.add,
-                                    color: isSelected
-                                        ? Colors.white
-                                        : const Color(0xFF7C4DFF)),
-                                onPressed: () {
-                                  setState(() {
-                                    if (isSelected) {
-                                      _selectedFriendId = null;
-                                    } else {
-                                      _selectedFriendId = friend['userId'];
-                                    }
-                                  });
-                                },
-                              ),
+                              child: hasPendingInvite
+                                  ? const Padding(
+                                      padding: EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 8),
+                                      child: Text(
+                                        'Request Sent',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    )
+                                  : IconButton(
+                                      icon: Icon(
+                                          isSelected ? Icons.check : Icons.add,
+                                          color: isSelected
+                                              ? Colors.white
+                                              : const Color(0xFF7C4DFF)),
+                                      onPressed: () {
+                                        setState(() {
+                                          if (isSelected) {
+                                            _selectedFriendId = null;
+                                          } else {
+                                            _selectedFriendId = friendId;
+                                          }
+                                        });
+                                      },
+                                    ),
                             ),
-                            onTap: () {
-                              setState(() {
-                                if (isSelected) {
-                                  _selectedFriendId = null;
-                                } else {
-                                  _selectedFriendId = friend['userId'];
-                                }
-                              });
-                            },
+                            onTap: hasPendingInvite
+                                ? null
+                                : () {
+                                    setState(() {
+                                      if (isSelected) {
+                                        _selectedFriendId = null;
+                                      } else {
+                                        _selectedFriendId = friendId;
+                                      }
+                                    });
+                                  },
                           ),
                         );
                       },
@@ -243,39 +269,25 @@ class _DuoChallengeInviteScreenState extends State<DuoChallengeInviteScreen> {
       _isInviting = true;
     });
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
-        throw Exception('User not authenticated');
+      final success = await _duoChallengeService.sendInvite(_selectedFriendId!);
+      // Always reload the Future after sending
+      setState(() {});
+      if (success) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Duo challenge invite sent successfully!'),
+              backgroundColor: Color(0xFF7C4DFF)),
+        );
+        Navigator.pop(context);
       }
-      await _firestore.collection('duo_challenge_invites').add({
-        'fromUserId': currentUser.uid,
-        'toUserId': _selectedFriendId,
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-        'challengeType': 'duo',
-        'expiresAt':
-            Timestamp.fromDate(DateTime.now().add(const Duration(hours: 24))),
-      });
-      final friendDoc =
-          await _firestore.collection('users').doc(_selectedFriendId).get();
-      final friendData = friendDoc.data();
-      final friendFcmToken = friendData != null ? friendData['fcmToken'] : null;
-      if (friendFcmToken != null && friendFcmToken != '') {
-        await _sendFcmDuoInvite(friendFcmToken,
-            currentUser.displayName ?? currentUser.email ?? 'Someone');
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Duo challenge invite sent successfully!'),
-            backgroundColor: Color(0xFF7C4DFF)),
-      );
-      Navigator.pop(context);
+      // If already sent, UI will update and show 'Request Sent' automatically
     } catch (e) {
+      print('Error sending duo challenge invite: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Error sending invite: [31m${e.toString()}[0m'),
+            content: Text('Error sending invite: ${e.toString()}'),
             backgroundColor: Colors.red),
       );
     } finally {
@@ -285,30 +297,5 @@ class _DuoChallengeInviteScreenState extends State<DuoChallengeInviteScreen> {
         });
       }
     }
-  }
-
-  Future<void> _sendFcmDuoInvite(
-      String fcmToken, String inviterUsername) async {
-    const String serverKey =
-        'YOUR_SERVER_KEY_HERE'; // Replace with your FCM server key for testing
-    final message = {
-      'to': fcmToken,
-      'notification': {
-        'title': 'Duo Challenge Invite',
-        'body': 'A0$inviterUsername is inviting you to a Duo Challenge!',
-      },
-      'data': {
-        'type': 'duo_challenge_invite',
-        'inviterUsername': inviterUsername,
-      }
-    };
-    await http.post(
-      Uri.parse('https://fcm.googleapis.com/fcm/send'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'key=$serverKey',
-      },
-      body: jsonEncode(message),
-    );
   }
 }

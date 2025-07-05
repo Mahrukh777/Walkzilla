@@ -9,6 +9,8 @@ import 'forgot_password_screen.dart';
 import 'services/health_service.dart';
 import 'services/username_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'main.dart';
+import 'services/friend_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -24,6 +26,7 @@ class LoginScreenState extends State<LoginScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final HealthService _healthService = HealthService();
   final UsernameService _usernameService = UsernameService();
+  final FriendService _friendService = FriendService();
 
   bool _isPasswordVisible = false; // Toggle password visibility
   bool _isLoading = false; // Show loading indicator
@@ -177,6 +180,12 @@ class LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (context) => const Home()),
           (route) => false,
         );
+        // Add a short delay to ensure the navigator is ready
+        Future.delayed(const Duration(milliseconds: 300), () async {
+          // Update pending friend requests to accepted if already friends
+          await _friendService.updatePendingRequestsToAcceptedIfFriends();
+          checkAndShowPendingInvites();
+        });
       }
     } catch (e) {
       print('Error in handling successful login: $e');

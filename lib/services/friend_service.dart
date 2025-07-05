@@ -98,6 +98,7 @@ class FriendService {
 
   // Accept friend request
   Future<bool> acceptFriendRequest(String requestId) async {
+    print('acceptFriendRequest called for requestId: $requestId');
     try {
       final currentUser = _auth.currentUser;
       if (currentUser == null) return false;
@@ -413,6 +414,41 @@ class FriendService {
     } catch (e) {
       print('Error getting suggested users: $e');
       return [];
+    }
+  }
+
+  /// Update all pending sent friend requests to 'accepted' if the users are already friends
+  Future<void> updatePendingRequestsToAcceptedIfFriends() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
+    // Get all friendships for the current user
+    final friendshipsQuery = await _firestore
+        .collection('friendships')
+        .where('users', arrayContains: currentUser.uid)
+        .get();
+    final friendUserIds = <String>{};
+    for (final doc in friendshipsQuery.docs) {
+      final users = List<String>.from(doc.data()['users'] ?? []);
+      friendUserIds.addAll(users.where((id) => id != currentUser.uid));
+    }
+
+    // Get all pending friend requests sent by the current user
+    final sentRequestsQuery = await _firestore
+        .collection('friend_requests')
+        .where('fromUserId', isEqualTo: currentUser.uid)
+        .where('status', isEqualTo: 'pending')
+        .get();
+
+    for (final doc in sentRequestsQuery.docs) {
+      final toUserId = doc.data()['toUserId'] as String;
+      if (friendUserIds.contains(toUserId)) {
+        await doc.reference.update({
+          'status': 'accepted',
+          'acceptedAt': FieldValue.serverTimestamp(),
+        });
+        print('Updated pending request to accepted for $toUserId');
+      }
     }
   }
 }

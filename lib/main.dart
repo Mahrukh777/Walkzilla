@@ -9,7 +9,11 @@ import 'providers/streak_provider.dart';
 import 'health_dashboard.dart';
 import 'streaks_screen.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'widgets/duo_challenge_invite_dialog.dart';
+import 'services/character_animation_service.dart';
+import 'services/duo_challenge_service.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -19,6 +23,51 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 // Global navigator key to show dialogs from anywhere
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// Function to save FCM token to Firestore
+Future<void> _saveFcmTokenToFirestore(String token) async {
+  try {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && token.isNotEmpty) {
+      print('Saving FCM token for user: ${user.uid}');
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({'fcmToken': token});
+      print(
+          'FCM token saved to Firestore successfully: ${token.substring(0, 20)}...');
+    } else {
+      print(
+          'Cannot save FCM token: user=${user?.uid}, token=${token.isNotEmpty}');
+    }
+  } catch (e) {
+    print('Error saving FCM token to Firestore: $e');
+  }
+}
+
+// Function to check for pending duo challenge invites and show popup
+Future<void> checkAndShowPendingInvites() async {
+  try {
+    final duoChallengeService = DuoChallengeService();
+    final pendingInvites = await duoChallengeService.checkPendingInvites();
+
+    if (pendingInvites.isNotEmpty) {
+      // Show the most recent invite
+      final latestInvite = pendingInvites.first;
+      final inviterUsername = latestInvite['inviterUsername'] as String;
+      final inviteId = latestInvite['inviteId'] as String;
+
+      print('Found pending duo challenge invite from $inviterUsername');
+
+      // Add a small delay to ensure the app is fully loaded
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      _showDuoChallengeInviteDialog(inviterUsername, inviteId);
+    }
+  } catch (e) {
+    print('Error checking pending invites: $e');
+  }
+}
 
 void main() async {
   try {
@@ -43,24 +92,75 @@ void main() async {
     // FCM setup
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
     final fcm = FirebaseMessaging.instance;
-    await fcm.requestPermission();
+
+    // Request permission
+    NotificationSettings settings = await fcm.requestPermission(
+      alert: true,
+      announcement: false,
+      badge: true,
+      carPlay: false,
+      criticalAlert: false,
+      provisional: false,
+      sound: true,
+    );
+
+    print('User granted permission: ${settings.authorizationStatus}');
+
     await fcm.setAutoInitEnabled(true);
-    // Optionally: print the FCM token for testing
+
+    // Get the token
     final token = await fcm.getToken();
-    print('FCM Token: $token');
+    print('FCM Token received: ${token?.substring(0, 20) ?? 'null'}...');
+
+    // Save token to Firestore if user is logged in
+    if (token != null) {
+      await _saveFcmTokenToFirestore(token);
+    } else {
+      print('Warning: FCM token is null');
+    }
+
+    // Listen for token refresh
+    fcm.onTokenRefresh.listen((newToken) {
+      print('FCM token refreshed: ${newToken.substring(0, 20)}...');
+      _saveFcmTokenToFirestore(newToken);
+    });
 
     // Listen for foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('Got a message whilst in the foreground!');
       print('Message data: ${message.data}');
+      print('Message notification: ${message.notification?.title}');
+      print('Message notification body: ${message.notification?.body}');
 
       if (message.data['type'] == 'duo_challenge_invite') {
+        print('Processing duo challenge invite notification');
         // Show popup for duo challenge invite
         _showDuoChallengeInviteDialog(
           message.data['inviterUsername'] ?? 'Someone',
           message.data['inviteId'] ?? '',
         );
       }
+    });
+
+    // Listen for when app is opened from notification
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print('App opened from notification: ${message.data}');
+      if (message.data['type'] == 'duo_challenge_invite') {
+        print('Processing duo challenge invite from notification tap');
+        _showDuoChallengeInviteDialog(
+          message.data['inviterUsername'] ?? 'Someone',
+          message.data['inviteId'] ?? '',
+        );
+      }
+    });
+
+    // Start preloading character animations at app startup
+    print('Main: Starting character animation preloading at app startup...');
+    CharacterAnimationService().preloadAnimations().then((_) {
+      print('Main: Character animation preloading completed at app startup');
+    }).catchError((error) {
+      print(
+          'Main: Failed to preload character animations at app startup: $error');
     });
 
     runApp(
@@ -101,8 +201,25 @@ void _showDuoChallengeInviteDialog(String inviterUsername, String inviteId) {
   }
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Check for pending invites when app starts if user is already logged in
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        checkAndShowPendingInvites();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
